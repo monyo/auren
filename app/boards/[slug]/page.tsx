@@ -189,16 +189,18 @@ export default function BoardPage() {
       </div>
 
       {/* FAB — new post */}
-      <button
-        onClick={() => router.push(`/boards/${slug}/new`)}
-        className="fixed bottom-[88px] right-6 w-[52px] h-[52px] rounded-full bg-[#F5A623]
-                   flex items-center justify-center shadow-[0_4px_20px_rgba(245,166,35,0.45)]
-                   active:scale-95 transition-transform z-10"
-      >
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0D1117" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M12 5v14M5 12h14"/>
-        </svg>
-      </button>
+      <div className="fixed bottom-[88px] left-1/2 -translate-x-1/2 w-full max-w-[500px] pointer-events-none z-10">
+        <button
+          onClick={() => router.push(`/boards/${slug}/new`)}
+          className="absolute right-6 bottom-0 w-[52px] h-[52px] rounded-full bg-[#F5A623]
+                     flex items-center justify-center shadow-[0_4px_20px_rgba(245,166,35,0.45)]
+                     active:scale-95 transition-transform pointer-events-auto"
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0D1117" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 5v14M5 12h14"/>
+          </svg>
+        </button>
+      </div>
 
       {/* Bottom nav */}
       <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-10

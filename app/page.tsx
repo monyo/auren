@@ -28,7 +28,6 @@ export default function HomePage() {
   const [tab, setTab] = useState<Tab>('popular')
   const [boards, setBoards] = useState<Board[]>([])
   const [loading, setLoading] = useState(true)
-  const [fabHint, setFabHint] = useState(false)
 
   useEffect(() => {
     const token = localStorage.getItem('token')
@@ -47,8 +46,7 @@ export default function HomePage() {
     : 'M'
 
   function handleFab() {
-    setFabHint(true)
-    setTimeout(() => setFabHint(false), 2000)
+    router.push('/murmurs/new')
   }
 
   return (
@@ -183,26 +181,19 @@ export default function HomePage() {
         )}
       </div>
 
-      {/* FAB hint toast */}
-      {fabHint && (
-        <div className="fixed bottom-[152px] right-6 z-20
-                        bg-[#21262D] border border-[#30363D] rounded-xl px-4 py-2.5
-                        shadow-[0_4px_20px_rgba(0,0,0,0.4)]">
-          <p className="text-[13px] text-[#C9D1D9] whitespace-nowrap">請先進入一個板塊</p>
-        </div>
-      )}
-
-      {/* FAB */}
-      <button
-        onClick={handleFab}
-        className="fixed bottom-[88px] right-6 w-[52px] h-[52px] rounded-full bg-[#F5A623]
-                   flex items-center justify-center shadow-[0_4px_20px_rgba(245,166,35,0.45)]
-                   active:scale-95 transition-transform z-10"
-      >
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0D1117" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M12 5v14M5 12h14"/>
-        </svg>
-      </button>
+      {/* FAB — 在 max-w 容器內定位，不跑出去 */}
+      <div className="fixed bottom-[88px] left-1/2 -translate-x-1/2 w-full max-w-[500px] pointer-events-none z-10">
+        <button
+          onClick={handleFab}
+          className="absolute right-6 bottom-0 w-[52px] h-[52px] rounded-full bg-[#F5A623]
+                     flex items-center justify-center shadow-[0_4px_20px_rgba(245,166,35,0.45)]
+                     active:scale-95 transition-transform pointer-events-auto"
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0D1117" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 5v14M5 12h14"/>
+          </svg>
+        </button>
+      </div>
 
       {/* Floating bottom nav */}
       <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-10
