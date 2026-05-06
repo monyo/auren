@@ -1,0 +1,24 @@
+# dependencies
+node_modules/
+
+# next.js
+.next/
+out/
+
+# env
+.env
+.env.local
+.env.*.local
+
+# drizzle migrations meta
+lib/db/migrations/meta/
+
+# misc
+.DS_Store
+*.pem
+npm-debug.log*
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+.gstack/
