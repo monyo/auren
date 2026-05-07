@@ -1,7 +1,10 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import Link from 'next/link'
+import useSWR from 'swr'
+import useSWRInfinite from 'swr/infinite'
 
 type Tab = 'favorites' | 'popular' | 'map' | 'murmurs'
 
@@ -58,55 +61,108 @@ export default function HomePage() {
     const t = searchParams.get('tab')
     return (t === 'murmurs' || t === 'favorites' || t === 'map') ? t : 'popular'
   })
-  const [boards, setBoards] = useState<Board[]>([])
-  const [loading, setLoading] = useState(true)
-  const [murmurs, setMurmurs] = useState<Murmur[]>([])
-  const [murmursLoading, setMurmursLoading] = useState(false)
-  const [murmursNextCursor, setMurmursNextCursor] = useState<string | null>(null)
+  const onlineFallback = useRef<Record<string, number>>({})
+  const murmurSentinelRef = useRef<HTMLDivElement>(null)
   const [favorites, setFavorites] = useState<Board[]>([])
-  const [favoritesLoading, setFavoritesLoading] = useState(false)
   const [favoritesLoaded, setFavoritesLoaded] = useState(false)
+  const [dragIdx, setDragIdx] = useState<number | null>(null)
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null)
 
   useEffect(() => {
     const token = localStorage.getItem('token')
     if (!token) router.replace('/verify')
   }, [router])
 
+  const { data: boardsData, isLoading: loading } = useSWR<Board[]>('/api/boards', (url: string) =>
+    fetch(url).then(r => r.ok ? r.json() : [])
+  )
+  const boards = boardsData ?? []
   useEffect(() => {
-    fetch('/api/boards')
-      .then(r => r.json())
-      .then(data => { setBoards(data); setLoading(false) })
-      .catch(() => setLoading(false))
-  }, [])
-
-  const nickname = typeof window !== 'undefined'
-    ? (localStorage.getItem('nickname') ?? 'M')
-    : 'M'
-
-  const loadMurmurs = useCallback((cursor?: string) => {
-    const url = cursor ? `/api/murmurs?cursor=${cursor}` : '/api/murmurs'
-    return fetch(url).then(r => r.json())
-  }, [])
-
-  useEffect(() => {
-    if (tab !== 'murmurs' || murmurs.length > 0) return
-    setMurmursLoading(true)
-    loadMurmurs().then(data => {
-      setMurmurs(data.items ?? [])
-      setMurmursNextCursor(data.nextCursor)
-      setMurmursLoading(false)
+    boards.forEach(b => {
+      if (!ONLINE[b.slug]) onlineFallback.current[b.slug] = Math.floor(Math.random() * 500 + 100)
     })
-  }, [tab, murmurs.length, loadMurmurs])
+  }, [boards])
 
+  // 頁面載入時就拿收藏清單，讓熱門板塊的星號能正確顯示
+  const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set())
   useEffect(() => {
-    if (tab !== 'favorites' || favoritesLoaded) return
-    setFavoritesLoading(true)
     const token = localStorage.getItem('token') ?? ''
+    if (!token) return
     fetch('/api/me/favorites', { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
-      .then(data => { setFavorites(data); setFavoritesLoading(false); setFavoritesLoaded(true) })
-      .catch(() => setFavoritesLoading(false))
-  }, [tab, favoritesLoaded])
+      .then((data: { id: string }[]) => {
+        setFavoriteIds(new Set(data.map(b => b.id)))
+        setFavorites(data as Board[])
+        setFavoritesLoaded(true)
+      })
+      .catch(() => {})
+  }, [])
+
+  async function toggleFavorite(e: React.MouseEvent, board: Board) {
+    e.stopPropagation()
+    const token = localStorage.getItem('token') ?? ''
+    const isFav = favoriteIds.has(board.id)
+    // optimistic update
+    setFavoriteIds(prev => {
+      const next = new Set(prev)
+      isFav ? next.delete(board.id) : next.add(board.id)
+      return next
+    })
+    setFavorites(prev => isFav ? prev.filter(b => b.id !== board.id) : [...prev, board])
+    await fetch('/api/me/favorites', {
+      method: isFav ? 'DELETE' : 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ boardId: board.id }),
+    })
+  }
+
+  function handleDrop(toIdx: number) {
+    if (dragIdx === null || dragIdx === toIdx) { setDragIdx(null); setDragOverIdx(null); return }
+    const next = [...favorites]
+    const [moved] = next.splice(dragIdx, 1)
+    next.splice(toIdx, 0, moved)
+    setFavorites(next)
+    setDragIdx(null)
+    setDragOverIdx(null)
+    const token = localStorage.getItem('token') ?? ''
+    fetch('/api/me/favorites', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ order: next.map(b => b.id) }),
+    })
+  }
+
+  const [nickname, setNickname] = useState('M')
+  useEffect(() => {
+    setNickname(localStorage.getItem('nickname') ?? 'M')
+  }, [])
+
+  const { data: murmurPages, size: murmurSize, setSize: setMurmurSize, isLoading: murmursLoading } = useSWRInfinite<{ items: Murmur[]; nextCursor: string | null }>(
+    (pageIndex, prevData) => {
+      if (tab !== 'murmurs') return null
+      if (prevData && !prevData.nextCursor) return null
+      return pageIndex === 0 ? '/api/murmurs' : `/api/murmurs?cursor=${prevData!.nextCursor}`
+    },
+    (url) => fetch(url).then(r => r.ok ? r.json() : { items: [], nextCursor: null })
+  )
+  const murmurs = murmurPages?.flatMap(p => p?.items ?? []) ?? []
+  const murmursHasMore = !!(murmurPages?.[murmurPages.length - 1]?.nextCursor)
+  const murmursLoadingMore = murmurSize > (murmurPages?.length ?? 0)
+
+  useEffect(() => {
+    const el = murmurSentinelRef.current
+    if (!el) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && murmursHasMore && !murmursLoadingMore) {
+          setMurmurSize(s => s + 1)
+        }
+      },
+      { rootMargin: '300px' }
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [murmursHasMore, murmursLoadingMore, setMurmurSize])
 
   function handleFab() {
     router.push('/murmurs/new')
@@ -150,7 +206,10 @@ export default function HomePage() {
         ] as { key: Tab; label: string }[]).map(t => (
           <button
             key={t.key}
-            onClick={() => setTab(t.key)}
+            onClick={() => {
+              setTab(t.key)
+              router.replace(t.key === 'popular' ? '/' : `/?tab=${t.key}`, { scroll: false })
+            }}
             className={`flex-1 py-[11px] text-[12px] font-semibold whitespace-nowrap relative transition-colors
                         min-w-[72px]
                         ${tab === t.key ? 'text-[#E6EDF3]' : 'text-[#8B949E] hover:text-[#C9D1D9]'}`}
@@ -182,17 +241,25 @@ export default function HomePage() {
             ) : (
               <div className="px-4 space-y-2">
                 {boards.map(board => (
-                  <button
+                  <Link
                     key={board.id}
-                    onClick={() => router.push(`/boards/${board.slug}`)}
+                    href={`/boards/${board.slug}`}
                     className="w-full text-left bg-[#161B22] border border-[#21262D] rounded-xl
-                               p-4 hover:border-[#30363D] hover:bg-[#1C2128] transition-colors active:scale-[0.99]"
+                               p-4 hover:border-[#30363D] hover:bg-[#1C2128] transition-colors active:scale-[0.99] block"
                   >
                     <div className="flex items-start justify-between mb-1.5">
-                      <span className="text-[15px] font-bold text-[#E6EDF3]">{board.name}</span>
-                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="text-[#3D444D] flex-shrink-0 mt-0.5">
-                        <path d="M6 3l5 5-5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                      </svg>
+                      <span className="text-[15px] font-bold text-[#E6EDF3] flex-1 mr-2">{board.name}</span>
+                      <button
+                        onClick={(e) => { e.preventDefault(); toggleFavorite(e, board) }}
+                        className="flex-shrink-0 p-0.5 -mr-0.5 text-[#484F58] hover:text-[#F5A623] transition-colors"
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24"
+                          fill={favoriteIds.has(board.id) ? '#F5A623' : 'none'}
+                          stroke={favoriteIds.has(board.id) ? '#F5A623' : 'currentColor'}
+                          strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+                        </svg>
+                      </button>
                     </div>
                     {board.description && (
                       <p className="text-[12px] text-[#7D8590] mb-3 leading-relaxed">{board.description}</p>
@@ -202,7 +269,7 @@ export default function HomePage() {
                         <span className="w-1.5 h-1.5 rounded-full bg-[#3FB950] flex-shrink-0" />
                         <span className="text-[12px] text-[#7D8590]">
                           <strong className="text-[#C9D1D9]">
-                            {(ONLINE[board.slug] ?? Math.floor(Math.random() * 500 + 100)).toLocaleString()}
+                            {(ONLINE[board.slug] ?? onlineFallback.current[board.slug] ?? 0).toLocaleString()}
                           </strong> 在線
                         </span>
                       </div>
@@ -212,7 +279,7 @@ export default function HomePage() {
                         </span>
                       </div>
                     </div>
-                  </button>
+                  </Link>
                 ))}
               </div>
             )}
@@ -221,7 +288,7 @@ export default function HomePage() {
 
         {tab === 'favorites' && (
           <>
-            {favoritesLoading ? (
+            {!favoritesLoaded ? (
               <div className="px-4 pt-3 space-y-2">
                 {[...Array(3)].map((_, i) => <div key={i} className="bg-[#161B22] border border-[#21262D] rounded-xl h-24 animate-pulse" />)}
               </div>
@@ -229,25 +296,58 @@ export default function HomePage() {
               <div className="flex flex-col items-center justify-center py-20 px-8 text-center">
                 <div className="text-4xl mb-4">⭐</div>
                 <p className="text-[15px] font-semibold text-[#E6EDF3] mb-2">還沒有收藏的板塊</p>
-                <p className="text-[13px] text-[#7D8590]">進入板塊後點右上角的星號收藏</p>
+                <p className="text-[13px] text-[#7D8590]">在板塊列表或板塊內點星號收藏</p>
               </div>
             ) : (
               <div className="px-4 pt-3 space-y-2">
-                {favorites.map(board => (
-                  <button key={board.id} onClick={() => router.push(`/boards/${board.slug}`)}
-                    className="w-full text-left bg-[#161B22] border border-[#21262D] rounded-xl
-                               p-4 hover:border-[#30363D] hover:bg-[#1C2128] transition-colors active:scale-[0.99]">
-                    <div className="flex items-start justify-between mb-1.5">
-                      <span className="text-[15px] font-bold text-[#E6EDF3]">{board.name}</span>
-                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="text-[#3D444D] flex-shrink-0 mt-0.5">
-                        <path d="M6 3l5 5-5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                      </svg>
+                {favorites.map((board, idx) => (
+                  <div
+                    key={board.id}
+                    draggable
+                    onDragStart={() => setDragIdx(idx)}
+                    onDragOver={(e) => { e.preventDefault(); setDragOverIdx(idx) }}
+                    onDrop={() => handleDrop(idx)}
+                    onDragEnd={() => { setDragIdx(null); setDragOverIdx(null) }}
+                    onClick={() => router.push(`/boards/${board.slug}`)}
+                    className={`w-full text-left bg-[#161B22] border rounded-xl
+                               p-4 transition-colors cursor-pointer select-none
+                               ${dragOverIdx === idx && dragIdx !== idx
+                                 ? 'border-[#F5A623]/60 bg-[#1C2128]'
+                                 : dragIdx === idx
+                                   ? 'border-[#21262D] opacity-40'
+                                   : 'border-[#21262D] hover:border-[#30363D] hover:bg-[#1C2128]'
+                               }`}
+                  >
+                    <div className="flex items-start gap-2">
+                      {/* drag handle */}
+                      <div className="flex-shrink-0 mt-0.5 text-[#3D444D] cursor-grab active:cursor-grabbing touch-none">
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
+                          <circle cx="4.5" cy="3" r="1.2"/><circle cx="9.5" cy="3" r="1.2"/>
+                          <circle cx="4.5" cy="7" r="1.2"/><circle cx="9.5" cy="7" r="1.2"/>
+                          <circle cx="4.5" cy="11" r="1.2"/><circle cx="9.5" cy="11" r="1.2"/>
+                        </svg>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-start justify-between mb-1.5">
+                          <span className="text-[15px] font-bold text-[#E6EDF3] flex-1 mr-2 truncate">{board.name}</span>
+                          <button
+                            onClick={(e) => toggleFavorite(e, board)}
+                            className="flex-shrink-0 p-0.5 -mr-0.5 text-[#F5A623] hover:text-[#484F58] transition-colors"
+                          >
+                            <svg width="16" height="16" viewBox="0 0 24 24"
+                              fill="#F5A623" stroke="#F5A623"
+                              strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+                            </svg>
+                          </button>
+                        </div>
+                        {board.description && <p className="text-[12px] text-[#7D8590] mb-2 truncate">{board.description}</p>}
+                        <span className="text-[11px] text-[#7D8590]">
+                          <strong className="text-[#C9D1D9]">{board.postCount.toLocaleString()}</strong> 篇文章
+                        </span>
+                      </div>
                     </div>
-                    {board.description && <p className="text-[12px] text-[#7D8590] mb-2">{board.description}</p>}
-                    <span className="text-[11px] text-[#7D8590]">
-                      <strong className="text-[#C9D1D9]">{board.postCount.toLocaleString()}</strong> 篇文章
-                    </span>
-                  </button>
+                  </div>
                 ))}
               </div>
             )}
@@ -279,7 +379,7 @@ export default function HomePage() {
             ) : (
               <div className="px-4 pt-3 divide-y divide-[#21262D]">
                 {murmurs.map(m => (
-                  <div key={m.id} className="py-4 cursor-pointer" onClick={() => router.push(`/murmurs/${m.id}`)}>
+                  <Link key={m.id} href={`/murmurs/${m.id}`} className="py-4 block">
                     <div className="flex items-center gap-2 mb-2">
                       <span className={`text-[13px] font-medium ${LEVEL_COLOR[m.authorLevel] ?? 'text-[#8B949E]'}`}>
                         {m.authorNickname}
@@ -305,18 +405,13 @@ export default function HomePage() {
                         {m.upvoteCount}
                       </span>
                     </div>
-                  </div>
+                  </Link>
                 ))}
-                {murmursNextCursor && (
-                  <button
-                    onClick={() => loadMurmurs(murmursNextCursor).then(data => {
-                      setMurmurs(prev => [...prev, ...(data.items ?? [])])
-                      setMurmursNextCursor(data.nextCursor)
-                    })}
-                    className="w-full py-4 text-[13px] text-[#7D8590] hover:text-[#E6EDF3] transition-colors"
-                  >
-                    載入更多
-                  </button>
+                <div ref={murmurSentinelRef} className="h-4" />
+                {murmursLoadingMore && (
+                  <div className="py-3 flex justify-center">
+                    <div className="w-5 h-5 border-2 border-[#F5A623] border-t-transparent rounded-full animate-spin" />
+                  </div>
                 )}
               </div>
             )}

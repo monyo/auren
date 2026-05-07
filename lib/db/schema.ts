@@ -7,6 +7,7 @@ import {
   pgEnum,
   index,
   uniqueIndex,
+  primaryKey,
 } from 'drizzle-orm/pg-core'
 
 // ─── Enums ────────────────────────────────────────────────────────────────────
@@ -127,6 +128,7 @@ export const murmurs = pgTable('murmurs', {
   content: text('content').notNull(),
   contentEditedAt: timestamp('content_edited_at', { withTimezone: true }),
   status: murmurStatusEnum('status').notNull().default('active'),
+  isPrivate: boolean('is_private').notNull().default(false),
   replyCount: integer('reply_count').notNull().default(0),
   upvoteCount: integer('upvote_count').notNull().default(0),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -146,6 +148,15 @@ export const murmurReplies = pgTable('murmur_replies', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
   index('murmur_replies_murmur_id_idx').on(t.murmurId, t.id),
+])
+
+// 文章按讚（每人只能讚一次）
+export const postUpvotes = pgTable('post_upvotes', {
+  postId: text('post_id').notNull().references(() => posts.id),
+  userId: text('user_id').notNull().references(() => users.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  primaryKey({ columns: [t.postId, t.userId] }),
 ])
 
 // ─── OTP ─────────────────────────────────────────────────────────────────────

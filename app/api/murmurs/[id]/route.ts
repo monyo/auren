@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { eq } from 'drizzle-orm'
+import { eq, and } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { murmurs, users } from '@/lib/db/schema'
 
@@ -22,7 +22,7 @@ export async function GET(
     })
     .from(murmurs)
     .innerJoin(users, eq(murmurs.authorId, users.id))
-    .where(eq(murmurs.id, id))
+    .where(and(eq(murmurs.id, id), eq(murmurs.isPrivate, false), eq(murmurs.status, 'active')))
     .limit(1)
 
   if (!row) return NextResponse.json({ error: 'Not found' }, { status: 404 })

@@ -32,7 +32,7 @@ export default function ProfilePage() {
     if (!token) { router.replace('/verify'); return }
     fetch('/api/me', { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
-      .then(data => { setUser(data); setNicknameInput(data.nickname); setLoading(false) })
+      .then(data => { setUser(data); setNicknameInput(data.nickname); localStorage.setItem('nickname', data.nickname); setLoading(false) })
       .catch(() => setLoading(false))
   }, [router])
 
@@ -185,6 +185,20 @@ export default function ProfilePage() {
                 {new Date(user.createdAt).toLocaleDateString('zh-TW', { year: 'numeric', month: 'long', day: 'numeric' })}
               </span>
             </div>
+
+            {/* My Space link */}
+            <button
+              onClick={() => router.push(`/u/${user.nickname}`)}
+              className="w-full py-3.5 text-[14px] font-semibold text-[#E6EDF3]
+                         bg-[#161B22] border border-[#21262D] rounded-xl
+                         hover:border-[#30363D] hover:bg-[#1C2128] transition-colors
+                         flex items-center justify-between px-4"
+            >
+              <span>我的 Murmur 空間</span>
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="text-[#3D444D]">
+                <path d="M6 3l5 5-5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
 
             {/* Logout */}
             <button

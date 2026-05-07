@@ -26,6 +26,7 @@ export async function GET(req: Request) {
     .where(
       and(
         eq(murmurs.status, 'active'),
+        eq(murmurs.isPrivate, false),
         cursor ? lt(murmurs.id, cursor) : undefined,
       )
     )
@@ -51,14 +52,14 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Invalid token' }, { status: 401 })
   }
 
-  const { content } = await req.json()
+  const { content, isPrivate } = await req.json()
   if (!content?.trim())
     return NextResponse.json({ error: '內容不能為空' }, { status: 400 })
   if (content.trim().length > 500)
     return NextResponse.json({ error: 'Murmur 最多 500 字' }, { status: 400 })
 
   const id = crypto.randomUUID()
-  await db.insert(murmurs).values({ id, authorId: userId, content: content.trim() })
+  await db.insert(murmurs).values({ id, authorId: userId, content: content.trim(), isPrivate: isPrivate === true })
 
   return NextResponse.json({ id }, { status: 201 })
 }

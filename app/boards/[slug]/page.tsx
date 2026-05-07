@@ -1,7 +1,10 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter, useParams } from 'next/navigation'
+import Link from 'next/link'
+import useSWR from 'swr'
+import useSWRInfinite from 'swr/infinite'
 
 type Board = {
   id: string
@@ -21,6 +24,10 @@ type Post = {
   authorNickname: string
   authorLevel: string
 }
+
+type PostsPage = { items: Post[]; nextCursor: string | null }
+
+const fetcher = (url: string) => fetch(url).then(r => r.ok ? r.json() : null)
 
 function timeAgo(iso: string) {
   const diff = Date.now() - new Date(iso).getTime()
@@ -44,32 +51,21 @@ const LEVEL_COLOR: Record<string, string> = {
 export default function BoardPage() {
   const router = useRouter()
   const { slug } = useParams<{ slug: string }>()
-
-  const [board, setBoard] = useState<Board | null>(null)
-  const [posts, setPosts] = useState<Post[]>([])
-  const [nextCursor, setNextCursor] = useState<string | null>(null)
-  const [loadingBoard, setLoadingBoard] = useState(true)
-  const [loadingPosts, setLoadingPosts] = useState(true)
-  const [loadingMore, setLoadingMore] = useState(false)
   const [favorited, setFavorited] = useState(false)
+  const sentinelRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    const token = localStorage.getItem('token')
-    if (!token) router.replace('/verify')
+    if (!localStorage.getItem('token')) router.replace('/verify')
   }, [router])
 
-  useEffect(() => {
-    fetch(`/api/boards/${slug}`)
-      .then(r => r.json())
-      .then(data => { setBoard(data); setLoadingBoard(false) })
-      .catch(() => setLoadingBoard(false))
-  }, [slug])
+  const { data: board } = useSWR<Board>(`/api/boards/${slug}`, fetcher)
 
   useEffect(() => {
     const token = localStorage.getItem('token') ?? ''
+    if (!token) return
     fetch('/api/me/favorites', { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.json())
-      .then((favs: { slug: string }[]) => setFavorited(favs.some(f => f.slug === slug)))
+      .then(r => r.ok ? r.json() : [])
+      .then((favs: { slug: string }[]) => setFavorited(Array.isArray(favs) && favs.some(f => f.slug === slug)))
       .catch(() => {})
   }, [slug])
 
@@ -77,37 +73,42 @@ export default function BoardPage() {
     if (!board) return
     const token = localStorage.getItem('token') ?? ''
     const method = favorited ? 'DELETE' : 'POST'
+    setFavorited(f => !f)
     await fetch('/api/me/favorites', {
       method,
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ boardId: board.id }),
     })
-    setFavorited(f => !f)
   }
 
-  const loadPosts = useCallback((cursor?: string) => {
-    const url = cursor
-      ? `/api/boards/${slug}/posts?cursor=${cursor}`
-      : `/api/boards/${slug}/posts`
-    return fetch(url).then(r => r.json())
-  }, [slug])
+  const { data: pages, size, setSize, isLoading: loadingPosts } = useSWRInfinite<PostsPage>(
+    (pageIndex, prevData) => {
+      if (prevData && !prevData.nextCursor) return null
+      return pageIndex === 0
+        ? `/api/boards/${slug}/posts`
+        : `/api/boards/${slug}/posts?cursor=${prevData!.nextCursor}`
+    },
+    fetcher
+  )
+
+  const posts = pages?.flatMap(p => p?.items ?? []) ?? []
+  const hasMore = !!(pages?.[pages.length - 1]?.nextCursor)
+  const isLoadingMore = size > (pages?.length ?? 0)
 
   useEffect(() => {
-    loadPosts().then(data => {
-      setPosts(data.items ?? [])
-      setNextCursor(data.nextCursor)
-      setLoadingPosts(false)
-    }).catch(() => setLoadingPosts(false))
-  }, [loadPosts])
-
-  async function loadMore() {
-    if (!nextCursor || loadingMore) return
-    setLoadingMore(true)
-    const data = await loadPosts(nextCursor)
-    setPosts(prev => [...prev, ...(data.items ?? [])])
-    setNextCursor(data.nextCursor)
-    setLoadingMore(false)
-  }
+    const el = sentinelRef.current
+    if (!el) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMore && !isLoadingMore) {
+          setSize(s => s + 1)
+        }
+      },
+      { rootMargin: '300px' }
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [hasMore, isLoadingMore, setSize])
 
   return (
     <div className="min-h-screen bg-[#0D1117] flex flex-col max-w-[500px] mx-auto">
@@ -123,35 +124,37 @@ export default function BoardPage() {
           </svg>
         </button>
 
-        {loadingBoard ? (
+        {!board ? (
           <div className="h-5 w-32 bg-[#21262D] rounded animate-pulse" />
         ) : (
-          <h1 className="text-[16px] font-bold text-[#E6EDF3] truncate flex-1">{board?.name}</h1>
+          <h1 className="text-[16px] font-bold text-[#E6EDF3] truncate flex-1">{board.name}</h1>
         )}
+
         <button onClick={toggleFavorite} className="text-[#8B949E] hover:text-[#F5A623] transition-colors p-1 flex-shrink-0">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill={favorited ? '#F5A623' : 'none'} stroke={favorited ? '#F5A623' : 'currentColor'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="20" height="20" viewBox="0 0 24 24"
+            fill={favorited ? '#F5A623' : 'none'}
+            stroke={favorited ? '#F5A623' : 'currentColor'}
+            strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
           </svg>
         </button>
       </header>
 
-      {/* Board info strip */}
-      {!loadingBoard && board && (
+      {/* Board info */}
+      {board && (
         <div className="px-5 py-3 border-b border-[#21262D] flex-shrink-0">
           {board.description && (
             <p className="text-[13px] text-[#7D8590] mb-2 leading-relaxed">{board.description}</p>
           )}
-          <div className="flex items-center gap-4">
-            <span className="text-[11px] text-[#484F58]">
-              <strong className="text-[#7D8590]">{board.postCount.toLocaleString()}</strong> 篇文章
-            </span>
-          </div>
+          <span className="text-[11px] text-[#484F58]">
+            <strong className="text-[#7D8590]">{board.postCount.toLocaleString()}</strong> 篇文章
+          </span>
         </div>
       )}
 
       {/* Post list */}
       <div className="flex-1 overflow-y-auto pb-32">
-        {loadingPosts ? (
+        {loadingPosts && posts.length === 0 ? (
           <div className="px-4 pt-3 space-y-2">
             {[...Array(5)].map((_, i) => (
               <div key={i} className="bg-[#161B22] border border-[#21262D] rounded-xl h-20 animate-pulse" />
@@ -166,11 +169,11 @@ export default function BoardPage() {
         ) : (
           <div className="px-4 pt-3 space-y-2">
             {posts.map(post => (
-              <button
+              <Link
                 key={post.id}
-                onClick={() => router.push(`/boards/${slug}/posts/${post.id}`)}
+                href={`/boards/${slug}/posts/${post.id}`}
                 className="w-full text-left bg-[#161B22] border border-[#21262D] rounded-xl
-                           p-4 hover:border-[#30363D] hover:bg-[#1C2128] transition-colors active:scale-[0.99]"
+                           p-4 hover:border-[#30363D] hover:bg-[#1C2128] transition-colors active:scale-[0.99] block"
               >
                 <p className="text-[14px] font-semibold text-[#E6EDF3] mb-2 leading-snug line-clamp-2">
                   {post.title}
@@ -197,24 +200,20 @@ export default function BoardPage() {
                     </span>
                   </span>
                 </div>
-              </button>
+              </Link>
             ))}
 
-            {nextCursor && (
-              <button
-                onClick={loadMore}
-                disabled={loadingMore}
-                className="w-full py-4 text-[13px] text-[#7D8590] hover:text-[#E6EDF3]
-                           transition-colors disabled:opacity-50"
-              >
-                {loadingMore ? '載入中...' : '載入更多'}
-              </button>
+            <div ref={sentinelRef} className="h-4" />
+            {isLoadingMore && (
+              <div className="py-3 flex justify-center">
+                <div className="w-5 h-5 border-2 border-[#F5A623] border-t-transparent rounded-full animate-spin" />
+              </div>
             )}
           </div>
         )}
       </div>
 
-      {/* FAB — new post */}
+      {/* FAB */}
       <div className="fixed bottom-[88px] left-1/2 -translate-x-1/2 w-full max-w-[500px] pointer-events-none z-10">
         <button
           onClick={() => router.push(`/boards/${slug}/new`)}

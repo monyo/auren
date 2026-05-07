@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server'
-import { eq, desc, sql } from 'drizzle-orm'
+import { eq, asc, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { posts, replies, users } from '@/lib/db/schema'
 import { verifySessionToken } from '@/lib/auth/session'
+import { broadcast } from '@/lib/sse'
 
 export async function GET(
   _req: Request,
@@ -22,7 +23,7 @@ export async function GET(
     .from(replies)
     .innerJoin(users, eq(replies.authorId, users.id))
     .where(eq(replies.postId, id))
-    .orderBy(desc(replies.id))
+    .orderBy(asc(replies.id))
 
   return NextResponse.json(rows)
 }
@@ -51,9 +52,23 @@ export async function POST(
   const [post] = await db.select({ id: posts.id }).from(posts).where(eq(posts.id, id)).limit(1)
   if (!post) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
+  const [author] = await db
+    .select({ nickname: users.nickname, verificationLevel: users.verificationLevel })
+    .from(users).where(eq(users.id, userId)).limit(1)
+
   const replyId = crypto.randomUUID()
+  const createdAt = new Date().toISOString()
   await db.insert(replies).values({ id: replyId, postId: id, authorId: userId, content: content.trim() })
   await db.update(posts).set({ replyCount: sql`${posts.replyCount} + 1` }).where(eq(posts.id, id))
+
+  broadcast(`post:${id}`, 'reply', {
+    id: replyId,
+    content: content.trim(),
+    upvoteCount: 0,
+    createdAt,
+    authorNickname: author?.nickname ?? '匿名',
+    authorLevel: author?.verificationLevel ?? 'level_1',
+  })
 
   return NextResponse.json({ id: replyId }, { status: 201 })
 }

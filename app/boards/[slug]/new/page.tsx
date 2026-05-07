@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 
 export default function NewPostPage() {
@@ -10,6 +10,7 @@ export default function NewPostPage() {
   const [content, setContent] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const contentRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     const token = localStorage.getItem('token')
@@ -33,6 +34,35 @@ export default function NewPostPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : '發文失敗，請稍後再試')
       setLoading(false)
+    }
+  }
+
+  function applyFormat(format: 'bold' | 'italic' | 'bullet') {
+    const el = contentRef.current
+    if (!el) return
+    const start = el.selectionStart
+    const end = el.selectionEnd
+    const val = content
+
+    if (format === 'bold' || format === 'italic') {
+      const marker = format === 'bold' ? '**' : '*'
+      const selected = val.slice(start, end) || (format === 'bold' ? '粗體' : '斜體')
+      const newVal = val.slice(0, start) + `${marker}${selected}${marker}` + val.slice(end)
+      setContent(newVal)
+      setTimeout(() => {
+        el.focus()
+        const cur = start + marker.length + selected.length + marker.length
+        el.setSelectionRange(cur, cur)
+      }, 0)
+    } else {
+      // toggle bullet at start of current line
+      const lineStart = val.lastIndexOf('\n', start - 1) + 1
+      const hasBullet = val.slice(lineStart).startsWith('- ')
+      const newVal = hasBullet
+        ? val.slice(0, lineStart) + val.slice(lineStart + 2)
+        : val.slice(0, lineStart) + '- ' + val.slice(lineStart)
+      setContent(newVal)
+      setTimeout(() => el.focus(), 0)
     }
   }
 
@@ -65,9 +95,9 @@ export default function NewPostPage() {
       </header>
 
       {/* Form */}
-      <div className="flex-1 flex flex-col px-5 pt-5 gap-4">
+      <div className="flex-1 flex flex-col px-5 pt-5 gap-4 overflow-hidden">
         {error && (
-          <div className="flex items-start gap-2.5 bg-[#3D1F1F] border border-[#F85149]/30 rounded-lg px-4 py-3">
+          <div className="flex items-start gap-2.5 bg-[#3D1F1F] border border-[#F85149]/30 rounded-lg px-4 py-3 flex-shrink-0">
             <span className="text-[#F85149] text-[13px]">!</span>
             <p className="text-[13px] text-[#F85149]">{error}</p>
           </div>
@@ -81,26 +111,62 @@ export default function NewPostPage() {
           maxLength={200}
           autoFocus
           className="w-full bg-transparent text-[20px] font-bold text-[#E6EDF3]
-                     placeholder:text-[#3D444D] focus:outline-none border-none"
+                     placeholder:text-[#3D444D] focus:outline-none border-none flex-shrink-0"
         />
 
-        <div className="h-px bg-[#21262D]" />
+        <div className="h-px bg-[#21262D] flex-shrink-0" />
 
         <textarea
+          ref={contentRef}
           value={content}
           onChange={e => setContent(e.target.value)}
           placeholder="說點什麼..."
-          className="flex-1 w-full min-h-[300px] bg-transparent text-[15px] text-[#C9D1D9]
+          className="flex-1 w-full min-h-[200px] bg-transparent text-[15px] text-[#C9D1D9]
                      placeholder:text-[#3D444D] focus:outline-none resize-none leading-relaxed"
         />
       </div>
 
-      {/* Footer hint */}
-      <div className="px-5 py-3 border-t border-[#21262D] flex items-center justify-between">
-        <span className="text-[11px] text-[#3D444D]">你的身份對其他用戶完全匿名</span>
-        <span className={`text-[11px] ${title.length > 180 ? 'text-[#F85149]' : 'text-[#3D444D]'}`}>
-          {title.length}/200
-        </span>
+      {/* Formatting toolbar + footer */}
+      <div className="border-t border-[#21262D] flex-shrink-0">
+        <div className="flex items-center gap-1 px-4 py-2 border-b border-[#21262D]">
+          <button
+            onMouseDown={e => { e.preventDefault(); applyFormat('bold') }}
+            className="w-8 h-8 flex items-center justify-center rounded-lg text-[#7D8590]
+                       hover:text-[#E6EDF3] hover:bg-[#21262D] transition-colors text-[14px] font-bold"
+            title="粗體"
+          >
+            B
+          </button>
+          <button
+            onMouseDown={e => { e.preventDefault(); applyFormat('italic') }}
+            className="w-8 h-8 flex items-center justify-center rounded-lg text-[#7D8590]
+                       hover:text-[#E6EDF3] hover:bg-[#21262D] transition-colors text-[14px] italic font-medium"
+            title="斜體"
+          >
+            I
+          </button>
+          <button
+            onMouseDown={e => { e.preventDefault(); applyFormat('bullet') }}
+            className="w-8 h-8 flex items-center justify-center rounded-lg text-[#7D8590]
+                       hover:text-[#E6EDF3] hover:bg-[#21262D] transition-colors"
+            title="條列"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="9" y1="6" x2="20" y2="6"/>
+              <line x1="9" y1="12" x2="20" y2="12"/>
+              <line x1="9" y1="18" x2="20" y2="18"/>
+              <circle cx="4" cy="6" r="1.5" fill="currentColor" stroke="none"/>
+              <circle cx="4" cy="12" r="1.5" fill="currentColor" stroke="none"/>
+              <circle cx="4" cy="18" r="1.5" fill="currentColor" stroke="none"/>
+            </svg>
+          </button>
+        </div>
+        <div className="px-5 py-3 flex items-center justify-between">
+          <span className="text-[11px] text-[#3D444D]">你的身份對其他用戶完全匿名</span>
+          <span className={`text-[11px] ${title.length > 180 ? 'text-[#F85149]' : 'text-[#3D444D]'}`}>
+            {title.length}/200
+          </span>
+        </div>
       </div>
     </div>
   )

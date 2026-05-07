@@ -54,6 +54,32 @@ export async function POST(req: Request) {
   return NextResponse.json({ ok: true })
 }
 
+export async function PATCH(req: Request) {
+  const token = req.headers.get('authorization')?.replace('Bearer ', '')
+  if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  let userId: string
+  try {
+    const payload = await verifySessionToken(token)
+    userId = payload.userId
+  } catch {
+    return NextResponse.json({ error: 'Invalid token' }, { status: 401 })
+  }
+
+  const { order } = await req.json() as { order: string[] }
+  if (!Array.isArray(order)) return NextResponse.json({ error: 'order required' }, { status: 400 })
+
+  await Promise.all(
+    order.map((boardId, idx) =>
+      db.update(userFavoriteBoards)
+        .set({ sortOrder: idx })
+        .where(and(eq(userFavoriteBoards.userId, userId), eq(userFavoriteBoards.boardId, boardId)))
+    )
+  )
+
+  return NextResponse.json({ ok: true })
+}
+
 export async function DELETE(req: Request) {
   const token = req.headers.get('authorization')?.replace('Bearer ', '')
   if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })

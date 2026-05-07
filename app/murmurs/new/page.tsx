@@ -6,11 +6,14 @@ import { useRouter } from 'next/navigation'
 export default function NewMurmurPage() {
   const router = useRouter()
   const [content, setContent] = useState('')
+  const [isPrivate, setIsPrivate] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [nickname, setNickname] = useState('')
 
   useEffect(() => {
     if (!localStorage.getItem('token')) router.replace('/verify')
+    setNickname(localStorage.getItem('nickname') ?? '')
   }, [router])
 
   async function submit() {
@@ -22,11 +25,15 @@ export default function NewMurmurPage() {
       const res = await fetch('/api/murmurs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({ content, isPrivate }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
-      router.replace('/?tab=murmurs')
+      if (nickname) {
+        router.replace(`/u/${nickname}`)
+      } else {
+        router.replace('/?tab=murmurs')
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : '發布失敗，請稍後再試')
       setLoading(false)
@@ -82,7 +89,25 @@ export default function NewMurmurPage() {
 
       {/* Footer */}
       <div className="px-5 py-3 border-t border-[#21262D] flex items-center justify-between">
-        <span className="text-[11px] text-[#3D444D]">發到你的個人空間，所有人可見</span>
+        <button
+          onClick={() => setIsPrivate(p => !p)}
+          className={`flex items-center gap-2 text-[12px] transition-colors ${isPrivate ? 'text-[#F5A623]' : 'text-[#484F58] hover:text-[#7D8590]'}`}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            {isPrivate ? (
+              <>
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+              </>
+            ) : (
+              <>
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                <path d="M7 11V7a5 5 0 0 1 9.9-1M17 11V7"/>
+              </>
+            )}
+          </svg>
+          {isPrivate ? '只有你看得到' : '所有人可見'}
+        </button>
         <span className={`text-[11px] ${remaining < 50 ? 'text-[#F85149]' : 'text-[#3D444D]'}`}>
           {remaining}
         </span>

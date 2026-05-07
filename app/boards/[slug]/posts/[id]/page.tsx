@@ -2,6 +2,61 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useRouter, useParams } from 'next/navigation'
+import type { ReactNode } from 'react'
+import useSWR from 'swr'
+
+function parseInline(text: string): ReactNode[] {
+  const nodes: ReactNode[] = []
+  const regex = /\*\*(.+?)\*\*|\*(.+?)\*/g
+  let last = 0, key = 0, match: RegExpExecArray | null
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > last) nodes.push(text.slice(last, match.index))
+    if (match[1] !== undefined) {
+      nodes.push(<strong key={key++} className="font-semibold text-[#E6EDF3]">{match[1]}</strong>)
+    } else {
+      nodes.push(<em key={key++} className="italic">{match[2]}</em>)
+    }
+    last = match.index + match[0].length
+  }
+  if (last < text.length) nodes.push(text.slice(last))
+  return nodes
+}
+
+function renderBody(content: string): ReactNode {
+  const lines = content.split('\n')
+  const nodes: ReactNode[] = []
+  let bullets: string[] = []
+  let key = 0
+
+  function flush() {
+    if (!bullets.length) return
+    nodes.push(
+      <ul key={key++} className="list-disc pl-5 my-1 space-y-0.5">
+        {bullets.map((b, i) => (
+          <li key={i} className="text-[15px] text-[#C9D1D9] leading-relaxed">{parseInline(b)}</li>
+        ))}
+      </ul>
+    )
+    bullets = []
+  }
+
+  for (const line of lines) {
+    if (line.startsWith('- ')) {
+      bullets.push(line.slice(2))
+    } else {
+      flush()
+      if (line === '') {
+        nodes.push(<div key={key++} className="h-3" />)
+      } else {
+        nodes.push(
+          <p key={key++} className="text-[15px] text-[#C9D1D9] leading-relaxed">{parseInline(line)}</p>
+        )
+      }
+    }
+  }
+  flush()
+  return <div className="space-y-0.5">{nodes}</div>
+}
 
 type Post = {
   id: string
@@ -49,9 +104,7 @@ export default function PostPage() {
   const router = useRouter()
   const { slug, id } = useParams<{ slug: string; id: string }>()
 
-  const [post, setPost] = useState<Post | null>(null)
-  const [replies, setReplies] = useState<Reply[]>([])
-  const [loadingPost, setLoadingPost] = useState(true)
+  const [upvoted, setUpvoted] = useState(false)
   const [replyText, setReplyText] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [replyError, setReplyError] = useState('')
@@ -62,16 +115,67 @@ export default function PostPage() {
     if (!token) router.replace('/verify')
   }, [router])
 
+  const { data: post, mutate: mutatePost, isLoading: loadingPost } = useSWR<Post>(
+    id ? `/api/posts/${id}` : null,
+    (url: string) => fetch(url).then(r => r.ok ? r.json() : null)
+  )
+
+  const { data: repliesData, mutate: mutateReplies } = useSWR<Reply[]>(
+    id ? `/api/posts/${id}/replies` : null,
+    (url: string) => fetch(url).then(r => r.ok ? r.json() : [])
+  )
+  const replies = repliesData ?? []
+
   useEffect(() => {
-    Promise.all([
-      fetch(`/api/posts/${id}`).then(r => r.json()),
-      fetch(`/api/posts/${id}/replies`).then(r => r.json()),
-    ]).then(([postData, repliesData]) => {
-      setPost(postData)
-      setReplies(repliesData)
-      setLoadingPost(false)
-    }).catch(() => setLoadingPost(false))
+    const token = localStorage.getItem('token') ?? ''
+    if (!id || !token) return
+    fetch(`/api/posts/${id}/upvote`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : { upvoted: false })
+      .then(data => setUpvoted(data.upvoted ?? false))
+      .catch(() => {})
   }, [id])
+
+  useEffect(() => {
+    if (!id) return
+    const es = new EventSource(`/api/posts/${id}/stream`)
+
+    es.addEventListener('reply', (e: MessageEvent) => {
+      const reply = JSON.parse(e.data) as Reply
+      mutateReplies(prev => {
+        const existing = prev ?? []
+        if (existing.some(r => r.id === reply.id)) return existing
+        return [...existing, reply]
+      }, false)
+      mutatePost(p => p ? { ...p, replyCount: p.replyCount + 1 } : p, false)
+    })
+
+    return () => es.close()
+  }, [id, mutateReplies, mutatePost])
+
+  async function toggleUpvote() {
+    if (!post) return
+    const token = localStorage.getItem('token') ?? ''
+    const newUpvoted = !upvoted
+    setUpvoted(newUpvoted)
+    mutatePost(p => p ? { ...p, upvoteCount: p.upvoteCount + (newUpvoted ? 1 : -1) } : p, false)
+    try {
+      const res = await fetch(`/api/posts/${id}/upvote`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setUpvoted(data.upvoted)
+        mutatePost(p => p ? { ...p, upvoteCount: data.upvoteCount } : p, false)
+      } else {
+        setUpvoted(!newUpvoted)
+        mutatePost(p => p ? { ...p, upvoteCount: p.upvoteCount - (newUpvoted ? 1 : -1) } : p, false)
+      }
+    } catch {
+      setUpvoted(!newUpvoted)
+      mutatePost(p => p ? { ...p, upvoteCount: p.upvoteCount - (newUpvoted ? 1 : -1) } : p, false)
+    }
+  }
 
   async function submitReply() {
     if (!replyText.trim() || submitting) return
@@ -87,16 +191,17 @@ export default function PostPage() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
       const nickname = localStorage.getItem('nickname') ?? '我'
-      setReplies(prev => [{
+      const newReply: Reply = {
         id: data.id,
         content: replyText.trim(),
         upvoteCount: 0,
         createdAt: new Date().toISOString(),
         authorNickname: nickname,
         authorLevel: localStorage.getItem('verificationLevel') ?? 'level_1',
-      }, ...prev])
+      }
+      mutateReplies(prev => [...(prev ?? []), newReply], false)
       setReplyText('')
-      if (post) setPost({ ...post, replyCount: post.replyCount + 1 })
+      mutatePost(p => p ? { ...p, replyCount: p.replyCount + 1 } : p, false)
     } catch (e) {
       setReplyError(e instanceof Error ? e.message : '留言失敗')
     } finally {
@@ -155,12 +260,16 @@ export default function PostPage() {
                   </>
                 )}
               </div>
-              <p className="text-[15px] text-[#C9D1D9] leading-relaxed whitespace-pre-wrap">
-                {post.content}
-              </p>
+              {renderBody(post.content)}
               <div className="flex items-center gap-5 mt-5 pt-4 border-t border-[#21262D]">
-                <button className="flex items-center gap-1.5 text-[13px] text-[#7D8590] hover:text-[#E6EDF3] transition-colors">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <button
+                  onClick={toggleUpvote}
+                  className={`flex items-center gap-1.5 text-[13px] transition-colors
+                    ${upvoted ? 'text-[#F5A623]' : 'text-[#7D8590] hover:text-[#E6EDF3]'}`}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24"
+                    fill={upvoted ? 'currentColor' : 'none'}
+                    stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/>
                     <path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/>
                   </svg>

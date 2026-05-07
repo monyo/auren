@@ -56,14 +56,16 @@ export default function MurmurPage() {
   }, [router])
 
   useEffect(() => {
-    Promise.all([
-      fetch(`/api/murmurs/${id}`).then(r => r.json()),
-      fetch(`/api/murmurs/${id}/replies`).then(r => r.json()),
-    ]).then(([m, r]) => {
-      setMurmur(m)
-      setReplies(r)
-      setLoading(false)
-    }).catch(() => setLoading(false))
+    fetch(`/api/murmurs/${id}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(m => { if (m?.id) setMurmur(m) })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+
+    fetch(`/api/murmurs/${id}/replies`)
+      .then(r => r.ok ? r.json() : [])
+      .then(r => Array.isArray(r) && setReplies(r))
+      .catch(() => {})
   }, [id])
 
   async function submitReply() {
