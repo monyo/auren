@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect, useCallback } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 
 type Tab = 'favorites' | 'popular' | 'map' | 'murmurs'
 
@@ -11,6 +11,16 @@ type Board = {
   name: string
   description: string | null
   postCount: number
+}
+
+type Murmur = {
+  id: string
+  content: string
+  replyCount: number
+  upvoteCount: number
+  createdAt: string
+  authorNickname: string
+  authorLevel: string
 }
 
 // Simulated online counts (will be real-time later)
@@ -23,11 +33,36 @@ const ONLINE: Record<string, number> = {
   'sports': 348,
 }
 
+const LEVEL_COLOR: Record<string, string> = {
+  level_4: 'text-[#F5A623]',
+  level_3: 'text-[#58A6FF]',
+  level_2: 'text-[#3FB950]',
+  level_1: 'text-[#8B949E]',
+}
+
+function timeAgo(iso: string) {
+  const diff = Date.now() - new Date(iso).getTime()
+  const m = Math.floor(diff / 60000)
+  if (m < 1) return '剛剛'
+  if (m < 60) return `${m} 分鐘前`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h} 小時前`
+  const d = Math.floor(h / 24)
+  return d < 30 ? `${d} 天前` : new Date(iso).toLocaleDateString('zh-TW', { month: 'short', day: 'numeric' })
+}
+
 export default function HomePage() {
   const router = useRouter()
-  const [tab, setTab] = useState<Tab>('popular')
+  const searchParams = useSearchParams()
+  const [tab, setTab] = useState<Tab>(() => {
+    const t = searchParams.get('tab')
+    return (t === 'murmurs' || t === 'favorites' || t === 'map') ? t : 'popular'
+  })
   const [boards, setBoards] = useState<Board[]>([])
   const [loading, setLoading] = useState(true)
+  const [murmurs, setMurmurs] = useState<Murmur[]>([])
+  const [murmursLoading, setMurmursLoading] = useState(false)
+  const [murmursNextCursor, setMurmursNextCursor] = useState<string | null>(null)
 
   useEffect(() => {
     const token = localStorage.getItem('token')
@@ -44,6 +79,21 @@ export default function HomePage() {
   const nickname = typeof window !== 'undefined'
     ? (localStorage.getItem('nickname') ?? 'M')
     : 'M'
+
+  const loadMurmurs = useCallback((cursor?: string) => {
+    const url = cursor ? `/api/murmurs?cursor=${cursor}` : '/api/murmurs'
+    return fetch(url).then(r => r.json())
+  }, [])
+
+  useEffect(() => {
+    if (tab !== 'murmurs' || murmurs.length > 0) return
+    setMurmursLoading(true)
+    loadMurmurs().then(data => {
+      setMurmurs(data.items ?? [])
+      setMurmursNextCursor(data.nextCursor)
+      setMurmursLoading(false)
+    })
+  }, [tab, murmurs.length, loadMurmurs])
 
   function handleFab() {
     router.push('/murmurs/new')
@@ -173,11 +223,64 @@ export default function HomePage() {
         )}
 
         {tab === 'murmurs' && (
-          <div className="flex flex-col items-center justify-center py-20 px-8 text-center">
-            <div className="text-4xl mb-4">💬</div>
-            <p className="text-[15px] font-semibold text-[#E6EDF3] mb-2">Murmurs</p>
-            <p className="text-[13px] text-[#7D8590]">即將推出</p>
-          </div>
+          <>
+            {murmursLoading ? (
+              <div className="px-4 pt-3 space-y-2">
+                {[...Array(4)].map((_, i) => (
+                  <div key={i} className="bg-[#161B22] border border-[#21262D] rounded-xl h-24 animate-pulse" />
+                ))}
+              </div>
+            ) : murmurs.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-20 px-8 text-center">
+                <div className="text-4xl mb-4">💬</div>
+                <p className="text-[15px] font-semibold text-[#E6EDF3] mb-2">還沒有 Murmur</p>
+                <p className="text-[13px] text-[#7D8590]">點右下角的 + 說點什麼吧</p>
+              </div>
+            ) : (
+              <div className="px-4 pt-3 divide-y divide-[#21262D]">
+                {murmurs.map(m => (
+                  <div key={m.id} className="py-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className={`text-[13px] font-medium ${LEVEL_COLOR[m.authorLevel] ?? 'text-[#8B949E]'}`}>
+                        {m.authorNickname}
+                      </span>
+                      <span className="text-[#3D444D] text-[11px]">·</span>
+                      <span className="text-[12px] text-[#484F58]">{timeAgo(m.createdAt)}</span>
+                    </div>
+                    <p className="text-[15px] text-[#C9D1D9] leading-relaxed whitespace-pre-wrap">
+                      {m.content}
+                    </p>
+                    <div className="flex items-center gap-4 mt-3">
+                      <span className="flex items-center gap-1.5 text-[12px] text-[#7D8590]">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                        </svg>
+                        {m.replyCount}
+                      </span>
+                      <span className="flex items-center gap-1.5 text-[12px] text-[#7D8590]">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/>
+                          <path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/>
+                        </svg>
+                        {m.upvoteCount}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+                {murmursNextCursor && (
+                  <button
+                    onClick={() => loadMurmurs(murmursNextCursor).then(data => {
+                      setMurmurs(prev => [...prev, ...(data.items ?? [])])
+                      setMurmursNextCursor(data.nextCursor)
+                    })}
+                    className="w-full py-4 text-[13px] text-[#7D8590] hover:text-[#E6EDF3] transition-colors"
+                  >
+                    載入更多
+                  </button>
+                )}
+              </div>
+            )}
+          </>
         )}
       </div>
 
