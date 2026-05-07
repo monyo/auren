@@ -63,6 +63,9 @@ export default function HomePage() {
   const [murmurs, setMurmurs] = useState<Murmur[]>([])
   const [murmursLoading, setMurmursLoading] = useState(false)
   const [murmursNextCursor, setMurmursNextCursor] = useState<string | null>(null)
+  const [favorites, setFavorites] = useState<Board[]>([])
+  const [favoritesLoading, setFavoritesLoading] = useState(false)
+  const [favoritesLoaded, setFavoritesLoaded] = useState(false)
 
   useEffect(() => {
     const token = localStorage.getItem('token')
@@ -94,6 +97,16 @@ export default function HomePage() {
       setMurmursLoading(false)
     })
   }, [tab, murmurs.length, loadMurmurs])
+
+  useEffect(() => {
+    if (tab !== 'favorites' || favoritesLoaded) return
+    setFavoritesLoading(true)
+    const token = localStorage.getItem('token') ?? ''
+    fetch('/api/me/favorites', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(data => { setFavorites(data); setFavoritesLoading(false); setFavoritesLoaded(true) })
+      .catch(() => setFavoritesLoading(false))
+  }, [tab, favoritesLoaded])
 
   function handleFab() {
     router.push('/murmurs/new')
@@ -207,11 +220,38 @@ export default function HomePage() {
         )}
 
         {tab === 'favorites' && (
-          <div className="flex flex-col items-center justify-center py-20 px-8 text-center">
-            <div className="text-4xl mb-4">⭐</div>
-            <p className="text-[15px] font-semibold text-[#E6EDF3] mb-2">還沒有收藏的板塊</p>
-            <p className="text-[13px] text-[#7D8590]">在熱門板塊找到喜歡的，點右上角收藏</p>
-          </div>
+          <>
+            {favoritesLoading ? (
+              <div className="px-4 pt-3 space-y-2">
+                {[...Array(3)].map((_, i) => <div key={i} className="bg-[#161B22] border border-[#21262D] rounded-xl h-24 animate-pulse" />)}
+              </div>
+            ) : favorites.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-20 px-8 text-center">
+                <div className="text-4xl mb-4">⭐</div>
+                <p className="text-[15px] font-semibold text-[#E6EDF3] mb-2">還沒有收藏的板塊</p>
+                <p className="text-[13px] text-[#7D8590]">進入板塊後點右上角的星號收藏</p>
+              </div>
+            ) : (
+              <div className="px-4 pt-3 space-y-2">
+                {favorites.map(board => (
+                  <button key={board.id} onClick={() => router.push(`/boards/${board.slug}`)}
+                    className="w-full text-left bg-[#161B22] border border-[#21262D] rounded-xl
+                               p-4 hover:border-[#30363D] hover:bg-[#1C2128] transition-colors active:scale-[0.99]">
+                    <div className="flex items-start justify-between mb-1.5">
+                      <span className="text-[15px] font-bold text-[#E6EDF3]">{board.name}</span>
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="text-[#3D444D] flex-shrink-0 mt-0.5">
+                        <path d="M6 3l5 5-5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    </div>
+                    {board.description && <p className="text-[12px] text-[#7D8590] mb-2">{board.description}</p>}
+                    <span className="text-[11px] text-[#7D8590]">
+                      <strong className="text-[#C9D1D9]">{board.postCount.toLocaleString()}</strong> 篇文章
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </>
         )}
 
         {tab === 'map' && (
@@ -239,7 +279,7 @@ export default function HomePage() {
             ) : (
               <div className="px-4 pt-3 divide-y divide-[#21262D]">
                 {murmurs.map(m => (
-                  <div key={m.id} className="py-4">
+                  <div key={m.id} className="py-4 cursor-pointer" onClick={() => router.push(`/murmurs/${m.id}`)}>
                     <div className="flex items-center gap-2 mb-2">
                       <span className={`text-[13px] font-medium ${LEVEL_COLOR[m.authorLevel] ?? 'text-[#8B949E]'}`}>
                         {m.authorNickname}
@@ -304,12 +344,12 @@ export default function HomePage() {
                       rounded-full px-7 py-3 flex items-center gap-8
                       shadow-[0_8px_32px_rgba(0,0,0,0.4)]">
         {[
-          { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>, label: 'search' },
-          { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.88"/></svg>, label: 'refresh' },
-          { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>, label: 'messages' },
-          { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>, label: 'settings' },
-        ].map(({ icon, label }) => (
-          <button key={label} className="text-[#E6EDF3]/35 hover:text-[#E6EDF3]/80 transition-colors">
+          { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>, label: 'search', action: () => router.push('/search') },
+          { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.88"/></svg>, label: 'refresh', action: () => window.location.reload() },
+          { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>, label: 'messages', action: () => {} },
+          { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>, label: 'settings', action: () => router.push('/profile') },
+        ].map(({ icon, label, action }) => (
+          <button key={label} onClick={action} className="text-[#E6EDF3]/35 hover:text-[#E6EDF3]/80 transition-colors">
             {icon}
           </button>
         ))}

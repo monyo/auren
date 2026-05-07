@@ -51,6 +51,7 @@ export default function BoardPage() {
   const [loadingBoard, setLoadingBoard] = useState(true)
   const [loadingPosts, setLoadingPosts] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
+  const [favorited, setFavorited] = useState(false)
 
   useEffect(() => {
     const token = localStorage.getItem('token')
@@ -63,6 +64,26 @@ export default function BoardPage() {
       .then(data => { setBoard(data); setLoadingBoard(false) })
       .catch(() => setLoadingBoard(false))
   }, [slug])
+
+  useEffect(() => {
+    const token = localStorage.getItem('token') ?? ''
+    fetch('/api/me/favorites', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then((favs: { slug: string }[]) => setFavorited(favs.some(f => f.slug === slug)))
+      .catch(() => {})
+  }, [slug])
+
+  async function toggleFavorite() {
+    if (!board) return
+    const token = localStorage.getItem('token') ?? ''
+    const method = favorited ? 'DELETE' : 'POST'
+    await fetch('/api/me/favorites', {
+      method,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ boardId: board.id }),
+    })
+    setFavorited(f => !f)
+  }
 
   const loadPosts = useCallback((cursor?: string) => {
     const url = cursor
@@ -105,8 +126,13 @@ export default function BoardPage() {
         {loadingBoard ? (
           <div className="h-5 w-32 bg-[#21262D] rounded animate-pulse" />
         ) : (
-          <h1 className="text-[16px] font-bold text-[#E6EDF3] truncate">{board?.name}</h1>
+          <h1 className="text-[16px] font-bold text-[#E6EDF3] truncate flex-1">{board?.name}</h1>
         )}
+        <button onClick={toggleFavorite} className="text-[#8B949E] hover:text-[#F5A623] transition-colors p-1 flex-shrink-0">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill={favorited ? '#F5A623' : 'none'} stroke={favorited ? '#F5A623' : 'currentColor'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+          </svg>
+        </button>
       </header>
 
       {/* Board info strip */}
