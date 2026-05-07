@@ -181,6 +181,18 @@ export const otpCodes = pgTable('otp_codes', {
   index('otp_codes_phone_hash_idx').on(t.phoneHash),
 ])
 
+// ─── User Feedback ────────────────────────────────────────────────────────────
+
+export const feedback = pgTable('feedback', {
+  id: text('id').primaryKey(),           // UUID v7
+  userId: text('user_id').references(() => users.id), // nullable，允許未登入回饋
+  content: text('content').notNull(),
+  category: text('category').notNull().default('general'), // bug | feature | other | general
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index('feedback_created_at_idx').on(t.createdAt),
+])
+
 // ─── Translation Cache ────────────────────────────────────────────────────────
 
 export const translationCache = pgTable('translation_cache', {

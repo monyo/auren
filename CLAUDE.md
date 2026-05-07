@@ -132,3 +132,27 @@ Token 有時效性，過期後連平台自己都無法把內容連回真人。
 A. 繼續深挖產品設計（板塊機制、帳號系統、內容品質）
 B. 開始動手做最小原型
 C. 先去找第一個潛在社群領袖驗證需求
+
+---
+
+## Dev Notes（給 Claude）
+
+### 環境限制
+- 伺服器 Node.js 版本是 **v14**，drizzle-kit 需要 v16+，`npm run db:generate` 和 `npm run db:migrate` 會因為語法錯誤失敗
+- **新增 migration 的正確做法**：手動寫 SQL 檔案到 `lib/db/migrations/`，用 psql 直接執行，例如：
+  ```bash
+  PGPASSWORD=auren_dev psql -h localhost -U mark -d auren -f lib/db/migrations/<file>.sql
+  ```
+- 資料庫：`postgresql://mark:auren_dev@localhost:5432/auren`
+- Redis：`redis://localhost:6379`（只用在 OTP rate limiting）
+
+### 架構摘要
+- SSE (`lib/sse.ts`)：in-process Map，單一 Node.js instance 夠用，多 instance 要換 Redis Pub/Sub
+- 頻道命名：`post:{id}`（回覆）、`board:{slug}`（新文章、upvote、刪除）
+- 所有 SSE route 都要加 `export const dynamic = 'force-dynamic'`
+- SWR + `useSWRInfinite`：所有列表頁統一用 cursor-based 分頁，sentinel div + IntersectionObserver 自動載入
+
+### 資料庫 Schema 重點
+- `users.id` = `userTokens.id`（token 就是用戶 ID，過期後無法回溯）
+- `posts.status` / `murmurs.status`：soft delete 用 `'deleted'`，查詢一律 `eq(status, 'active')`
+- Upvote 表：`post_upvotes`（已建）、`murmur_upvotes`（已建，migration 0002）
