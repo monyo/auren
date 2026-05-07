@@ -145,6 +145,14 @@ export default function BoardPage() {
       }, false)
     })
 
+    es.addEventListener('post_deleted', (e: MessageEvent) => {
+      const { postId } = JSON.parse(e.data) as { postId: string }
+      mutatePages(prev => {
+        if (!prev) return prev
+        return prev.map(page => ({ ...page, items: page.items.filter(p => p.id !== postId) }))
+      }, false)
+    })
+
     return () => es.close()
   }, [slug, mutatePages])
 

@@ -159,6 +159,15 @@ export const postUpvotes = pgTable('post_upvotes', {
   primaryKey({ columns: [t.postId, t.userId] }),
 ])
 
+// Murmur 按讚（每人只能讚一次）
+export const murmurUpvotes = pgTable('murmur_upvotes', {
+  murmurId: text('murmur_id').notNull().references(() => murmurs.id),
+  userId: text('user_id').notNull().references(() => users.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  primaryKey({ columns: [t.murmurId, t.userId] }),
+])
+
 // ─── OTP ─────────────────────────────────────────────────────────────────────
 
 export const otpCodes = pgTable('otp_codes', {

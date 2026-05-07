@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter, useParams } from 'next/navigation'
+import useSWRInfinite from 'swr/infinite'
 
 type UserInfo = {
   id: string
@@ -16,6 +17,14 @@ type MurmurItem = {
   replyCount: number
   upvoteCount: number
   createdAt: string
+}
+
+type Page = {
+  user: UserInfo
+  items: MurmurItem[]
+  nextCursor: string | null
+  isOwner: boolean
+  error?: string
 }
 
 const LEVEL_COLOR: Record<string, string> = {
@@ -46,44 +55,50 @@ function timeAgo(iso: string) {
 export default function UserSpacePage() {
   const router = useRouter()
   const { nickname } = useParams<{ nickname: string }>()
-
-  const [user, setUser] = useState<UserInfo | null>(null)
-  const [items, setItems] = useState<MurmurItem[]>([])
-  const [nextCursor, setNextCursor] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [loadingMore, setLoadingMore] = useState(false)
-  const [isOwner, setIsOwner] = useState(false)
-  const [notFound, setNotFound] = useState(false)
-
-  const load = useCallback((cursor?: string) => {
-    const token = localStorage.getItem('token') ?? ''
-    const url = cursor
-      ? `/api/users/${encodeURIComponent(nickname)}/murmurs?cursor=${cursor}`
-      : `/api/users/${encodeURIComponent(nickname)}/murmurs`
-    return fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
-      .then(r => r.json())
-  }, [nickname])
+  const sentinelRef = useRef<HTMLDivElement>(null)
+  const [token, setToken] = useState('')
 
   useEffect(() => {
-    if (!localStorage.getItem('token')) { router.replace('/verify'); return }
-    load().then(data => {
-      if (data.error === 'User not found') { setNotFound(true); setLoading(false); return }
-      setUser(data.user)
-      setItems(data.items ?? [])
-      setNextCursor(data.nextCursor)
-      setIsOwner(data.isOwner)
-      setLoading(false)
-    }).catch(() => setLoading(false))
-  }, [load, router])
+    const t = localStorage.getItem('token') ?? ''
+    if (!t) { router.replace('/verify'); return }
+    setToken(t)
+  }, [router])
 
-  async function loadMore() {
-    if (!nextCursor || loadingMore) return
-    setLoadingMore(true)
-    const data = await load(nextCursor)
-    setItems(prev => [...prev, ...(data.items ?? [])])
-    setNextCursor(data.nextCursor)
-    setLoadingMore(false)
-  }
+  const { data: pages, size, setSize, isLoading } = useSWRInfinite<Page>(
+    (pageIndex, prevData) => {
+      if (!token) return null
+      if (prevData && !prevData.nextCursor) return null
+      const base = `/api/users/${encodeURIComponent(nickname)}/murmurs`
+      const url = pageIndex === 0 ? base : `${base}?cursor=${prevData!.nextCursor}`
+      return [url, token]
+    },
+    ([url, tok]: [string, string]) =>
+      fetch(url, { headers: { Authorization: `Bearer ${tok}` } }).then(r => r.json())
+  )
+
+  const firstPage = pages?.[0]
+  const user = firstPage?.user ?? null
+  const isOwner = firstPage?.isOwner ?? false
+  const notFound = firstPage?.error === 'User not found'
+
+  const items = pages?.flatMap(p => p?.items ?? []) ?? []
+  const hasMore = !!(pages?.[pages.length - 1]?.nextCursor)
+  const isLoadingMore = size > (pages?.length ?? 0)
+
+  useEffect(() => {
+    const el = sentinelRef.current
+    if (!el) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMore && !isLoadingMore) {
+          setSize(s => s + 1)
+        }
+      },
+      { rootMargin: '300px' }
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [hasMore, isLoadingMore, setSize])
 
   if (notFound) {
     return (
@@ -108,12 +123,12 @@ export default function UserSpacePage() {
           </svg>
         </button>
         <h1 className="text-[16px] font-bold text-[#E6EDF3] truncate flex-1">
-          {loading ? '' : user?.nickname ?? nickname}
+          {user?.nickname ?? nickname}
         </h1>
       </header>
 
       {/* Profile strip */}
-      {!loading && user && (
+      {user && (
         <div className="px-5 py-4 border-b border-[#21262D]">
           <div className="flex items-center gap-3">
             <div className="w-[48px] h-[48px] rounded-full bg-[#21262D] border-2 border-[#F5A623]
@@ -141,7 +156,7 @@ export default function UserSpacePage() {
 
       {/* Murmur list */}
       <div className="flex-1 overflow-y-auto pb-10">
-        {loading ? (
+        {isLoading && items.length === 0 ? (
           <div className="px-4 pt-4 space-y-2">
             {[...Array(4)].map((_, i) => (
               <div key={i} className="bg-[#161B22] border border-[#21262D] rounded-xl h-24 animate-pulse" />
@@ -192,15 +207,11 @@ export default function UserSpacePage() {
               </div>
             ))}
 
-            {nextCursor && (
-              <button
-                onClick={loadMore}
-                disabled={loadingMore}
-                className="w-full py-4 text-[13px] text-[#7D8590] hover:text-[#E6EDF3]
-                           transition-colors disabled:opacity-50"
-              >
-                {loadingMore ? '載入中...' : '載入更多'}
-              </button>
+            <div ref={sentinelRef} className="h-4" />
+            {isLoadingMore && (
+              <div className="py-3 flex justify-center">
+                <div className="w-5 h-5 border-2 border-[#F5A623] border-t-transparent rounded-full animate-spin" />
+              </div>
             )}
           </div>
         )}

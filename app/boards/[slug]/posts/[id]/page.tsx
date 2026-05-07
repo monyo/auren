@@ -70,6 +70,7 @@ type Post = {
   authorLevel: string
   boardSlug: string
   boardName: string
+  isAuthor: boolean
 }
 
 type Reply = {
@@ -110,6 +111,14 @@ export default function PostPage() {
   const [replyError, setReplyError] = useState('')
   const replyRef = useRef<HTMLTextAreaElement>(null)
 
+  const [showMenu, setShowMenu] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [editContent, setEditContent] = useState('')
+  const [editSaving, setEditSaving] = useState(false)
+  const [editError, setEditError] = useState('')
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+
   useEffect(() => {
     const token = localStorage.getItem('token')
     if (!token) router.replace('/verify')
@@ -117,7 +126,11 @@ export default function PostPage() {
 
   const { data: post, mutate: mutatePost, isLoading: loadingPost } = useSWR<Post>(
     id ? `/api/posts/${id}` : null,
-    (url: string) => fetch(url).then(r => r.ok ? r.json() : null)
+    (url: string) => {
+      const token = localStorage.getItem('token') ?? ''
+      return fetch(url, token ? { headers: { Authorization: `Bearer ${token}` } } : {})
+        .then(r => r.ok ? r.json() : null)
+    }
   )
 
   const { data: repliesData, mutate: mutateReplies } = useSWR<Reply[]>(
@@ -209,6 +222,53 @@ export default function PostPage() {
     }
   }
 
+  function startEdit() {
+    if (!post) return
+    setEditContent(post.content)
+    setEditError('')
+    setEditing(true)
+    setShowMenu(false)
+  }
+
+  async function saveEdit() {
+    if (!editContent.trim() || editSaving) return
+    setEditError('')
+    setEditSaving(true)
+    const token = localStorage.getItem('token') ?? ''
+    try {
+      const res = await fetch(`/api/posts/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ content: editContent }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      mutatePost(p => p ? { ...p, content: editContent.trim(), contentEditedAt: data.contentEditedAt } : p, false)
+      setEditing(false)
+    } catch (e) {
+      setEditError(e instanceof Error ? e.message : '儲存失敗')
+    } finally {
+      setEditSaving(false)
+    }
+  }
+
+  async function deletePost() {
+    setDeleting(true)
+    const token = localStorage.getItem('token') ?? ''
+    try {
+      const res = await fetch(`/api/posts/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (res.ok) {
+        router.replace(`/boards/${slug}`)
+      }
+    } finally {
+      setDeleting(false)
+      setConfirmDelete(false)
+    }
+  }
+
   return (
     <div className="min-h-screen bg-[#0D1117] flex flex-col max-w-[500px] mx-auto">
 
@@ -222,9 +282,51 @@ export default function PostPage() {
             <path d="M15 18l-6-6 6-6"/>
           </svg>
         </button>
-        <span className="text-[14px] font-semibold text-[#7D8590] truncate">
+        <span className="text-[14px] font-semibold text-[#7D8590] truncate flex-1">
           {post?.boardName ?? slug}
         </span>
+        {post?.isAuthor && (
+          <div className="relative flex-shrink-0">
+            <button
+              onClick={() => setShowMenu(v => !v)}
+              className="text-[#8B949E] hover:text-[#E6EDF3] transition-colors p-1"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/>
+              </svg>
+            </button>
+            {showMenu && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setShowMenu(false)} />
+                <div className="absolute right-0 top-8 z-20 bg-[#1C2128] border border-[#30363D] rounded-xl
+                                shadow-[0_8px_32px_rgba(0,0,0,0.5)] overflow-hidden min-w-[120px]">
+                  <button
+                    onClick={startEdit}
+                    className="w-full text-left px-4 py-3 text-[14px] text-[#E6EDF3]
+                               hover:bg-[#21262D] transition-colors flex items-center gap-2.5"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                    </svg>
+                    編輯
+                  </button>
+                  <div className="border-t border-[#21262D]" />
+                  <button
+                    onClick={() => { setConfirmDelete(true); setShowMenu(false) }}
+                    className="w-full text-left px-4 py-3 text-[14px] text-[#F85149]
+                               hover:bg-[#21262D] transition-colors flex items-center gap-2.5"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
+                    </svg>
+                    刪除
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </header>
 
       {/* Scrollable content */}
@@ -260,7 +362,41 @@ export default function PostPage() {
                   </>
                 )}
               </div>
-              {renderBody(post.content)}
+
+              {editing ? (
+                <div className="space-y-2">
+                  <textarea
+                    value={editContent}
+                    onChange={e => setEditContent(e.target.value)}
+                    autoFocus
+                    rows={6}
+                    className="w-full bg-[#0D1117] border border-[#30363D] rounded-xl
+                               px-4 py-3 text-[14px] text-[#E6EDF3] leading-relaxed
+                               focus:outline-none focus:border-[#F5A623] resize-none transition-colors"
+                  />
+                  {editError && <p className="text-[12px] text-[#F85149]">{editError}</p>}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={saveEdit}
+                      disabled={!editContent.trim() || editSaving}
+                      className="flex-1 h-9 bg-[#F5A623] text-black text-[13px] font-semibold rounded-lg
+                                 disabled:opacity-40 transition-opacity"
+                    >
+                      {editSaving ? '儲存中...' : '儲存'}
+                    </button>
+                    <button
+                      onClick={() => { setEditing(false); setEditError('') }}
+                      className="flex-1 h-9 bg-[#21262D] text-[#8B949E] text-[13px] rounded-lg
+                                 hover:bg-[#30363D] transition-colors"
+                    >
+                      取消
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                renderBody(post.content)
+              )}
+
               <div className="flex items-center gap-5 mt-5 pt-4 border-t border-[#21262D]">
                 <button
                   onClick={toggleUpvote}
@@ -355,6 +491,33 @@ export default function PostPage() {
           </button>
         </div>
       </div>
+
+      {/* Delete confirmation overlay */}
+      {confirmDelete && (
+        <div className="fixed inset-0 z-30 flex items-center justify-center px-6 bg-black/60">
+          <div className="bg-[#1C2128] border border-[#30363D] rounded-2xl p-6 w-full max-w-[320px]">
+            <h3 className="text-[16px] font-bold text-[#E6EDF3] mb-2">刪除文章？</h3>
+            <p className="text-[13px] text-[#7D8590] mb-5">這個動作無法復原。</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setConfirmDelete(false)}
+                className="flex-1 h-10 bg-[#21262D] text-[#8B949E] text-[14px] rounded-xl
+                           hover:bg-[#30363D] transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={deletePost}
+                disabled={deleting}
+                className="flex-1 h-10 bg-[#F85149] text-white text-[14px] font-semibold rounded-xl
+                           disabled:opacity-50 transition-opacity"
+              >
+                {deleting ? '刪除中...' : '確認刪除'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
