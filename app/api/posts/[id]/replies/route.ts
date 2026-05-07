@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { eq, asc, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
-import { posts, replies, users } from '@/lib/db/schema'
+import { boards, posts, replies, users } from '@/lib/db/schema'
 import { verifySessionToken } from '@/lib/auth/session'
 import { broadcast } from '@/lib/sse'
 
@@ -49,7 +49,12 @@ export async function POST(
   if (!content?.trim())
     return NextResponse.json({ error: '內容不能為空' }, { status: 400 })
 
-  const [post] = await db.select({ id: posts.id }).from(posts).where(eq(posts.id, id)).limit(1)
+  const [post] = await db
+    .select({ id: posts.id, boardSlug: boards.slug })
+    .from(posts)
+    .innerJoin(boards, eq(posts.boardId, boards.id))
+    .where(eq(posts.id, id))
+    .limit(1)
   if (!post) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
   const [author] = await db
@@ -61,6 +66,8 @@ export async function POST(
   await db.insert(replies).values({ id: replyId, postId: id, authorId: userId, content: content.trim() })
   await db.update(posts).set({ replyCount: sql`${posts.replyCount} + 1` }).where(eq(posts.id, id))
 
+  const [updated] = await db.select({ replyCount: posts.replyCount }).from(posts).where(eq(posts.id, id)).limit(1)
+
   broadcast(`post:${id}`, 'reply', {
     id: replyId,
     content: content.trim(),
@@ -68,6 +75,10 @@ export async function POST(
     createdAt,
     authorNickname: author?.nickname ?? '匿名',
     authorLevel: author?.verificationLevel ?? 'level_1',
+  })
+  broadcast(`board:${post.boardSlug}`, 'post_updated', {
+    postId: id,
+    replyCount: updated?.replyCount ?? 0,
   })
 
   return NextResponse.json({ id: replyId }, { status: 201 })

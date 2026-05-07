@@ -81,7 +81,7 @@ export default function BoardPage() {
     })
   }
 
-  const { data: pages, size, setSize, isLoading: loadingPosts } = useSWRInfinite<PostsPage>(
+  const { data: pages, mutate: mutatePages, size, setSize, isLoading: loadingPosts } = useSWRInfinite<PostsPage>(
     (pageIndex, prevData) => {
       if (prevData && !prevData.nextCursor) return null
       return pageIndex === 0
@@ -109,6 +109,44 @@ export default function BoardPage() {
     observer.observe(el)
     return () => observer.disconnect()
   }, [hasMore, isLoadingMore, setSize])
+
+  useEffect(() => {
+    if (!slug) return
+    const es = new EventSource(`/api/boards/${slug}/stream`)
+
+    es.addEventListener('new_post', (e: MessageEvent) => {
+      const post = JSON.parse(e.data) as Post
+      mutatePages(prev => {
+        if (!prev?.length) return prev
+        const first = prev[0]
+        if (first.items.some(p => p.id === post.id)) return prev
+        return [{ ...first, items: [post, ...first.items] }, ...prev.slice(1)]
+      }, false)
+    })
+
+    es.addEventListener('post_updated', (e: MessageEvent) => {
+      const { postId, replyCount, upvoteCount } = JSON.parse(e.data) as {
+        postId: string; replyCount?: number; upvoteCount?: number
+      }
+      mutatePages(prev => {
+        if (!prev) return prev
+        return prev.map(page => ({
+          ...page,
+          items: page.items.map(p =>
+            p.id === postId
+              ? {
+                  ...p,
+                  ...(replyCount !== undefined ? { replyCount } : {}),
+                  ...(upvoteCount !== undefined ? { upvoteCount } : {}),
+                }
+              : p
+          ),
+        }))
+      }, false)
+    })
+
+    return () => es.close()
+  }, [slug, mutatePages])
 
   return (
     <div className="min-h-screen bg-[#0D1117] flex flex-col max-w-[500px] mx-auto">

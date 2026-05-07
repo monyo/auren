@@ -3,6 +3,7 @@ import { eq, lt, desc, and, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { boards, posts, users } from '@/lib/db/schema'
 import { verifySessionToken } from '@/lib/auth/session'
+import { broadcast } from '@/lib/sse'
 
 const PAGE_SIZE = 20
 
@@ -81,7 +82,12 @@ export async function POST(
     .limit(1)
   if (!board) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
+  const [author] = await db
+    .select({ nickname: users.nickname, verificationLevel: users.verificationLevel })
+    .from(users).where(eq(users.id, userId)).limit(1)
+
   const id = crypto.randomUUID()
+  const createdAt = new Date().toISOString()
   await db.insert(posts).values({
     id,
     boardId: board.id,
@@ -90,6 +96,16 @@ export async function POST(
     content: content.trim(),
   })
   await db.update(boards).set({ postCount: sql`${boards.postCount} + 1` }).where(eq(boards.id, board.id))
+
+  broadcast(`board:${slug}`, 'new_post', {
+    id,
+    title: title.trim(),
+    replyCount: 0,
+    upvoteCount: 0,
+    createdAt,
+    authorNickname: author?.nickname ?? '匿名',
+    authorLevel: author?.verificationLevel ?? 'level_1',
+  })
 
   return NextResponse.json({ id }, { status: 201 })
 }
